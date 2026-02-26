@@ -215,6 +215,9 @@ body>*{position:relative;z-index:1;}
 .round-pill{background:var(--bg2);border:1px solid var(--border);border-radius:100px;padding:5px 16px;font-size:.78rem;color:var(--muted);margin-bottom:14px;}
 ::-webkit-scrollbar{width:4px;}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px;}
+#scroll-top-btn{position:fixed;bottom:calc(24px + var(--safe-bottom));right:18px;z-index:8000;width:42px;height:42px;border-radius:50%;background:var(--bg2);border:1.5px solid var(--border2);color:var(--teal2);font-size:1.1rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 18px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;-webkit-tap-highlight-color:transparent;}
+#scroll-top-btn.visible{opacity:1;pointer-events:auto;}
+#scroll-top-btn:hover{background:rgba(0,212,170,.15);border-color:var(--teal);transform:translateY(-2px);}
 .overlay{position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.72);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:16px;}
 .overlay.hidden{display:none;}
 .modal{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r2);padding:28px 22px;width:100%;max-width:400px;box-shadow:0 24px 64px rgba(0,0,0,.6);text-align:center;}
@@ -462,10 +465,27 @@ body>*{position:relative;z-index:1;}
       </div>
     </div>
   </div>
+  <!-- PROGRESS BAR -->
+  <div style="width:100%;max-width:600px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px">
+      <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:2px;color:var(--muted)">Lyrics Progress</div>
+      <div style="font-size:.78rem;font-weight:600;color:var(--teal2)" id="progress-label">0 / 0 songs</div>
+    </div>
+    <div style="height:10px;background:var(--bg3);border-radius:100px;overflow:hidden;border:1px solid var(--border)">
+      <div id="progress-bar-fill" style="height:100%;width:0%;background:linear-gradient(90deg,var(--teal),var(--teal2));border-radius:100px;transition:width .5s ease;"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:5px">
+      <div class="small muted" id="progress-done-label">0 ready to play</div>
+      <div class="small muted" id="progress-missing-label">0 need lyrics</div>
+    </div>
+  </div>
+  <div style="width:100%;max-width:600px;display:flex;gap:8px;margin-bottom:8px;align-items:center">
+    <input class="editor-filter" id="editor-search" placeholder="🔍 Filter by song or artist…" oninput="filterEditor()" style="margin:0;flex:1"/>
+    <button class="btn btn-outline btn-sm" onclick="jumpToRandomMissing()" title="Jump to a random song that needs lyrics" style="white-space:nowrap;flex-shrink:0">🎲 Random</button>
+  </div>
   <div class="small muted center" style="max-width:500px;margin-bottom:10px;line-height:1.6">
     Paste the <strong style="color:var(--blush)">full lyrics</strong> for each song. The game randomly picks 4 lines per round.
   </div>
-  <input class="editor-filter" id="editor-search" placeholder="🔍 Filter by song or artist…" oninput="filterEditor()"/>
   <div class="editor-grid" id="editor-grid"></div>
 </div>
 
@@ -979,10 +999,65 @@ function buildLyricsEditor(){
   }
   renderEditorGrid(SONG_POOL);
 }
-function filterEditor(){const q=document.getElementById('editor-search').value.toLowerCase();renderEditorGrid(SONG_POOL.filter(s=>s.artist.toLowerCase().includes(q)||s.song.toLowerCase().includes(q)));}
+
+function updateProgressBar(){
+  const total=SONG_POOL.length;
+  const done=SONG_POOL.filter(s=>{const k=songKey(s.artist,s.song);return allLyrics[k]&&allLyrics[k].lines&&allLyrics[k].lines.length>=4;}).length;
+  const missing=total-done;
+  const pct=total>0?Math.round((done/total)*100):0;
+  const fill=document.getElementById('progress-bar-fill');
+  const label=document.getElementById('progress-label');
+  const doneLabel=document.getElementById('progress-done-label');
+  const missLabel=document.getElementById('progress-missing-label');
+  if(!fill)return;
+  fill.style.width=pct+'%';
+  // Colour shift: red → yellow → teal based on completion
+  if(pct===100){fill.style.background='linear-gradient(90deg,var(--teal),var(--teal2))';}
+  else if(pct>=50){fill.style.background='linear-gradient(90deg,#f5c842,var(--teal))';}
+  else{fill.style.background='linear-gradient(90deg,var(--red),#f5c842)';}
+  label.textContent=done+' / '+total+' songs';
+  doneLabel.textContent=done+' ready to play ✓';
+  missLabel.textContent=missing>0?missing+' need lyrics':'All done! 🎉';
+  missLabel.style.color=missing>0?'var(--muted)':'var(--teal2)';
+}
+
+function jumpToRandomMissing(){
+  const missing=SONG_POOL.filter(s=>{const k=songKey(s.artist,s.song);return!(allLyrics[k]&&allLyrics[k].lines&&allLyrics[k].lines.length>=4);});
+  if(!missing.length){alert('🎉 All songs already have lyrics!');return;}
+  const pick=missing[Math.floor(Math.random()*missing.length)];
+  // Clear filter and re-render so the song is visible
+  const searchEl=document.getElementById('editor-search');
+  if(searchEl)searchEl.value='';
+  renderEditorGrid(SONG_POOL);
+  const key=songKey(pick.artist,pick.song);
+  // Open the row and scroll to it
+  setTimeout(()=>{
+    const row=document.getElementById('erow-'+key);
+    if(!row)return;
+    // Close any open rows first
+    document.querySelectorAll('.song-row-body.open').forEach(b=>{b.classList.remove('open');b.previousElementSibling.classList.remove('open');});
+    // Open this one
+    document.getElementById('ebody-'+key).classList.add('open');
+    document.getElementById('ehdr-'+key).classList.add('open');
+    row.style.outline='2px solid var(--teal)';
+    row.scrollIntoView({behavior:'smooth',block:'center'});
+    // Focus the textarea
+    setTimeout(()=>{
+      const ta=document.getElementById('eta-'+key);
+      if(ta)ta.focus();
+      setTimeout(()=>row.style.outline='',2500);
+    },400);
+  },80);
+}
+
+function filterEditor(){
+  const q=document.getElementById('editor-search').value.toLowerCase();
+  renderEditorGrid(SONG_POOL.filter(s=>s.artist.toLowerCase().includes(q)||s.song.toLowerCase().includes(q)));
+}
+
 function renderEditorGrid(songs){
   const grid=document.getElementById('editor-grid');
-  if(!songs.length){grid.innerHTML='<div class="muted center small" style="padding:24px">No songs yet. Add some above!</div>';return;}
+  if(!songs.length){grid.innerHTML='<div class="muted center small" style="padding:24px">No songs yet. Add some above!</div>';updateProgressBar();return;}
   grid.innerHTML='';
   songs.forEach(s=>{
     const key=songKey(s.artist,s.song);const stored=allLyrics[key]||{};const lines=stored.lines||[];
@@ -997,6 +1072,7 @@ function renderEditorGrid(songs){
     ta.addEventListener('input',()=>saveLyricBlob(key,ta.value));
     grid.appendChild(row);
   });
+  updateProgressBar();
 }
 function toggleEditorRow(key){document.getElementById('ebody-'+key).classList.toggle('open');document.getElementById('ehdr-'+key).classList.toggle('open');}
 let saveTimers={};
@@ -1010,6 +1086,7 @@ function saveLyricBlob(key,rawText){
       const badge=document.getElementById('badge-'+key);const counter=document.getElementById('linecount-'+key);
       if(badge){badge.className='song-row-status '+(hasLyrics?'has-lyrics':'no-lyrics');badge.textContent=hasLyrics?('✓ '+lines.length+' lines'):'✗ No lyrics';}
       if(counter)counter.textContent=lines.length+' usable lines stored';
+      updateProgressBar();
     });
   },700);
 }
@@ -1155,11 +1232,20 @@ function deleteSong(){
 
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
+// ─── SCROLL TO TOP ───
+window.addEventListener('scroll',()=>{
+  const btn=document.getElementById('scroll-top-btn');
+  if(!btn)return;
+  btn.classList.toggle('visible',window.scrollY>300);
+});
+
 window.addEventListener('load',()=>{
   initFirebase();
   const params=new URLSearchParams(location.search);const code=params.get('code');
   if(code){document.getElementById('join-code').value=code.toUpperCase();go('screen-join');}
 });
 </script>
+<button id="scroll-top-btn" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Back to top" aria-label="Scroll to top">↑</button>
+
 </body>
 </html>
