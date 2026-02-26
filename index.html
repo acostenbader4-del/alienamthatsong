@@ -122,6 +122,19 @@ body>*{position:relative;z-index:1;}
 .locked-box{background:rgba(78,204,168,.08);border:1px solid rgba(78,204,168,.35);border-radius:var(--r);padding:16px;text-align:center;}
 .locked-box .lbig{font-family:'Playfair Display',serif;font-size:1.05rem;color:var(--teal3);margin:5px 0 2px;}
 .locked-box .lsub{font-size:.75rem;color:var(--muted);}
+.mc-grid{display:flex;flex-direction:column;gap:10px;margin-top:4px;}
+.mc-btn{width:100%;padding:14px 16px;background:var(--bg3);border:1.5px solid var(--border);border-radius:var(--r);color:var(--blush);font-family:'DM Sans',sans-serif;font-size:.9rem;font-weight:500;text-align:left;cursor:pointer;transition:all .18s;line-height:1.35;-webkit-tap-highlight-color:transparent;display:flex;align-items:center;}
+.mc-btn:hover:not(:disabled){border-color:var(--teal);background:rgba(0,212,170,.07);}
+.mc-btn:active:not(:disabled){transform:scale(.98);}
+.mc-btn.selected{border-color:var(--teal);background:rgba(0,212,170,.12);color:var(--teal2);}
+.mc-btn:disabled{opacity:.5;cursor:not-allowed;}
+.mc-content{flex:1;min-width:0;}
+.mc-song{font-weight:600;display:block;}
+.mc-artist{font-size:.78rem;color:var(--muted);display:block;margin-top:2px;}
+.mc-btn.selected .mc-artist{color:var(--teal);}
+.mc-letter{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:rgba(255,255,255,.07);font-size:.72rem;font-weight:700;flex-shrink:0;margin-right:12px;transition:all .18s;}
+.mc-btn.selected .mc-letter{background:var(--teal);color:#0d1117;}
+.mc-lock-btn{margin-top:12px;}
 .res-circle{width:84px;height:84px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:2rem;margin:0 auto 14px;}
 .res-correct{background:rgba(78,204,168,.12);border:2px solid var(--green);}
 .res-wrong{background:rgba(255,107,122,.12);border:2px solid var(--red);}
@@ -372,26 +385,17 @@ body>*{position:relative;z-index:1;}
       <div class="card-title">Your Answer</div>
       <div id="player-answer-content">
         <div class="small muted" style="margin-bottom:12px;line-height:1.6">🎯 Lock in early = more points! Points based on how many lyrics were revealed.</div>
-        <div class="field" style="margin-bottom:10px">
-          <label>Artist</label>
-          <select id="player-artist-sel" onchange="playerArtistChange()">
-            <option value="">— Select artist —</option>
-          </select>
+        <div class="mc-grid" id="mc-grid">
+          <div class="small muted center" style="padding:16px 0">Waiting for round to start…</div>
         </div>
-        <div class="field" style="margin-bottom:14px">
-          <label>Song</label>
-          <select id="player-song-sel" onchange="playerSelChange()" disabled>
-            <option value="">— Select song —</option>
-          </select>
-        </div>
-        <button class="btn btn-teal btn-full" id="player-lock-btn" onclick="lockAnswer()" disabled>🔒 Lock In Answer</button>
+        <button class="btn btn-teal btn-full mc-lock-btn" id="player-lock-btn" onclick="lockAnswer()" disabled>🔒 Lock In Answer</button>
       </div>
       <div id="player-locked-display" style="display:none">
         <div class="locked-box">
           <div>✅ Locked in!</div>
-          <div class="lbig" id="locked-artist-show">—</div>
           <div class="lbig" id="locked-song-show">—</div>
-          <div class="lsub">Locked in after <span id="locked-pts-show">—</span> lyric(s)</div>
+          <div class="lbig" id="locked-artist-show" style="font-size:.88rem;margin-top:0">—</div>
+          <div class="lsub" style="margin-top:6px">Locked in after <span id="locked-pts-show">—</span> lyric(s)</div>
         </div>
       </div>
     </div>
@@ -660,6 +664,34 @@ function loadRandomSong(){
   setTimeout(()=>loadRandomFrom(eligible),600);
 }
 
+function generateChoices(correct){
+  // Get 3 distractors from pool that don't have too-similar names to the correct answer
+  const correctKey=correct.song.toLowerCase().trim();
+  const others=SONG_POOL.filter(s=>!(s.artist===correct.artist&&s.song===correct.song));
+  // Simple similarity check: reject if >60% of words overlap with correct song title
+  function tooSimilar(a,b){
+    const wa=new Set(a.toLowerCase().split(/\s+/));const wb=b.toLowerCase().split(/\s+/);
+    const overlap=wb.filter(w=>wa.has(w)).length;
+    return overlap/(Math.max(wa.size,wb.length)||1)>0.6;
+  }
+  // Shuffle and pick up to 3 dissimilar ones
+  const shuffled=[...others].sort(()=>Math.random()-.5);
+  const distractors=[];
+  for(const s of shuffled){
+    if(distractors.length>=3)break;
+    if(tooSimilar(correct.song,s.song))continue;
+    distractors.push({artist:s.artist,song:s.song});
+  }
+  // Fill remaining with any if pool is small
+  for(const s of shuffled){
+    if(distractors.length>=3)break;
+    if(!distractors.find(d=>d.song===s.song))distractors.push({artist:s.artist,song:s.song});
+  }
+  // Combine and shuffle
+  const all=[{artist:correct.artist,song:correct.song},...distractors.slice(0,3)];
+  return all.sort(()=>Math.random()-.5);
+}
+
 function loadRandomFrom(eligible){
   const pick=eligible[Math.floor(Math.random()*eligible.length)];
   const key=songKey(pick.artist,pick.song);
@@ -679,7 +711,9 @@ function loadRandomFrom(eligible){
   document.getElementById('host-answer-peek').style.display='block';
   for(let i=0;i<4;i++){const pip=document.getElementById('pip-'+i);if(pip)pip.classList.remove('active');}
   renderHostLyrics();
-  pushRoundState({number:currentRound,revealed:0,ready:true,answerShown:false,artist:currentSong.artist,song:currentSong.song,lyrics:chosen});
+  const choices=generateChoices(currentSong);
+  currentSong.choices=choices;
+  pushRoundState({number:currentRound,revealed:0,ready:true,answerShown:false,artist:currentSong.artist,song:currentSong.song,lyrics:chosen,choices});
 }
 
 function renderHostLyrics(){
@@ -697,7 +731,7 @@ function revealNext(){
   revealedCount++;
   for(let i=0;i<revealedCount;i++){const pip=document.getElementById('pip-'+i);if(pip)pip.classList.add('active');}
   renderHostLyrics();
-  pushRoundState({number:currentRound,revealed:revealedCount,ready:true,answerShown:false,artist:currentSong.artist,song:currentSong.song,lyrics:currentSong.lyrics});
+  pushRoundState({number:currentRound,revealed:revealedCount,ready:true,answerShown:false,artist:currentSong.artist,song:currentSong.song,lyrics:currentSong.lyrics,choices:currentSong.choices});
 }
 
 function showAnswer(){
@@ -705,7 +739,7 @@ function showAnswer(){
   document.getElementById('host-answer-reveal').style.display='block';
   document.getElementById('ans-artist-reveal').textContent=currentSong.artist;
   document.getElementById('ans-song-reveal').textContent=currentSong.song;
-  pushRoundState({number:currentRound,revealed:revealedCount,ready:true,answerShown:true,artist:currentSong.artist,song:currentSong.song,lyrics:currentSong.lyrics});
+  pushRoundState({number:currentRound,revealed:revealedCount,ready:true,answerShown:true,artist:currentSong.artist,song:currentSong.song,lyrics:currentSong.lyrics,choices:currentSong.choices});
   scoreRound();
 }
 
@@ -804,9 +838,6 @@ function joinGame(){
     subsRef=db.ref('games/'+gameCode+'/submissions');
     playersRef.child(playerId).set({name,score:0,joined:Date.now()});
     document.getElementById('player-name-show').textContent=name;
-    const as=document.getElementById('player-artist-sel');
-    as.innerHTML='<option value="">— Select artist —</option>';
-    getArtists().forEach(a=>{const o=document.createElement('option');o.value=o.textContent=a;as.appendChild(o);});
     go('screen-player-waiting');
     listenAsPlayer();
   }).catch(e=>showJoinErr('Error: '+e.message));
@@ -818,12 +849,43 @@ function listenAsPlayer(){
   roundRef.on('value',snap=>{
     const r=snap.val();if(!r)return;
     document.getElementById('player-round-num').textContent=r.number;
-    if(r.number!==lastRoundNum){lastRoundNum=r.number;locked=false;lockedAtReveal=0;resetPlayerAnswerUI();currentRound=r.number;initPlayerLyricCards();}
+    if(r.number!==lastRoundNum){lastRoundNum=r.number;locked=false;lockedAtReveal=0;currentRound=r.number;initPlayerLyricCards();resetPlayerAnswerUI();}
     updatePlayerLyrics(r.revealed||0,r.lyrics||[]);
+    // Build MC choices once we have them from the round state
+    if(r.choices&&r.choices.length&&!locked){buildMCChoices(r.choices);}
     if(r.answerShown&&r.ready){setTimeout(()=>showPlayerResult(r),1400);}
     else if(r.ready){const cur=document.querySelector('.screen.active');if(!cur||cur.id!=='screen-player-game')go('screen-player-game');}
     else{const cur=document.querySelector('.screen.active');if(!cur||(cur.id!=='screen-player-waiting'&&cur.id!=='screen-player-game'))go('screen-player-waiting');}
   });
+}
+
+let mcSelected=null; // {artist, song}
+
+function buildMCChoices(choices){
+  const grid=document.getElementById('mc-grid');
+  if(!grid)return;
+  const letters=['A','B','C','D'];
+  grid.innerHTML=choices.map((c,i)=>`
+    <button class="mc-btn" id="mc-${i}" onclick="selectMC(${i})">
+      <span class="mc-letter">${letters[i]}</span>
+      <span class="mc-content">
+        <span class="mc-song">${esc(c.song)}</span>
+        <span class="mc-artist">${esc(c.artist)}</span>
+      </span>
+    </button>`).join('');
+  // Store choices on window for lockAnswer access
+  window._mcChoices=choices;
+  mcSelected=null;
+  document.getElementById('player-lock-btn').disabled=true;
+}
+
+function selectMC(idx){
+  if(locked)return;
+  mcSelected=window._mcChoices[idx];
+  document.querySelectorAll('.mc-btn').forEach((b,i)=>{
+    b.classList.toggle('selected',i===idx);
+  });
+  document.getElementById('player-lock-btn').disabled=false;
 }
 
 function initPlayerLyricCards(){
@@ -843,30 +905,19 @@ function updatePlayerLyrics(revealed,lyrics){
 function resetPlayerAnswerUI(){
   document.getElementById('player-answer-content').style.display='block';
   document.getElementById('player-locked-display').style.display='none';
-  document.getElementById('player-artist-sel').value='';
-  document.getElementById('player-song-sel').innerHTML='<option value="">— Select song —</option>';
-  document.getElementById('player-song-sel').disabled=true;
   document.getElementById('player-lock-btn').disabled=true;
+  mcSelected=null;
+  window._mcChoices=null;
+  const grid=document.getElementById('mc-grid');
+  if(grid)grid.innerHTML='<div class="small muted center" style="padding:16px 0">Loading choices…</div>';
 }
-function playerArtistChange(){
-  const a=document.getElementById('player-artist-sel').value;
-  const ss=document.getElementById('player-song-sel');
-  ss.innerHTML='<option value="">— Select song —</option>';ss.disabled=!a;
-  if(a)getSongs(a).forEach(s=>{const o=document.createElement('option');o.value=o.textContent=s.song;ss.appendChild(o);});
-  checkLockReady();
-}
-function playerSelChange(){checkLockReady();}
-function checkLockReady(){
-  const a=document.getElementById('player-artist-sel').value;
-  const s=document.getElementById('player-song-sel').value;
-  document.getElementById('player-lock-btn').disabled=!(a&&s&&!locked);
-}
+
 function lockAnswer(){
-  if(locked)return;
-  const artist=document.getElementById('player-artist-sel').value;
-  const song=document.getElementById('player-song-sel').value;
-  if(!artist||!song)return;
+  if(locked||!mcSelected)return;
+  const {artist,song}=mcSelected;
   locked=true;
+  // Disable all MC buttons
+  document.querySelectorAll('.mc-btn').forEach(b=>b.disabled=true);
   roundRef.once('value',snap=>{
     const r=snap.val()||{};const revealedNow=r.revealed||0;
     const ptsMap={1:5,2:4,3:3,4:2};const pts=ptsMap[revealedNow]||2;
@@ -874,8 +925,8 @@ function lockAnswer(){
     subsRef.child(playerId).set({artist,song,pts,locked:true,scored:false,correct:false,revealedAt:revealedNow,ts:Date.now()});
     document.getElementById('player-answer-content').style.display='none';
     document.getElementById('player-locked-display').style.display='block';
-    document.getElementById('locked-artist-show').textContent=artist;
     document.getElementById('locked-song-show').textContent=song;
+    document.getElementById('locked-artist-show').textContent=artist;
     document.getElementById('locked-pts-show').textContent=revealedNow;
   });
 }
